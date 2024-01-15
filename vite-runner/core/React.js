@@ -14,7 +14,8 @@ function createElement(type, props, ...children) {
         props: {
             ...props,
             children: children.map(child => {
-                return typeof child === 'object'
+                const isTextNode = typeof child === 'string' || typeof child === 'number'
+                return !isTextNode
                     ? child
                     : createTextNode(child)
             })
@@ -29,6 +30,8 @@ function render(el, container) {
             children: [el]
         }
     }
+
+    root = nextWorkOfUnit;
 }
 
 function createDom(type) {
@@ -46,9 +49,9 @@ function updateProps(dom, props) {
     })
 }
 
-function initChildren(fiber) {
-    let preChild = null;
-    fiber.props.children.forEach((child, index) => {
+function initChildren(fiber, children) {
+    let prevChild = null;
+    children.forEach((child, index) => {
         const newFiber = {
             type: child.type,
             props: child.props,
@@ -60,34 +63,54 @@ function initChildren(fiber) {
         if (index === 0) {
             fiber.child = newFiber
         } else {
-            preChild.sibling = newFiber
+            prevChild.sibling = newFiber
         }
-        preChild = child
+        prevChild = newFiber
     })
 
 }
 
-function performWorkForUnit(fiber) {
+function updateFunctionComponent(fiber) {
+    const children = [fiber.type(fiber.props)]
+    initChildren(fiber, children)
+}
+
+function updateHostComponent(fiber) {
     if (!fiber.dom) {
         const dom = (fiber.dom = createDom(fiber.type))
-        fiber.parent.dom.append(dom)
 
         updateProps(dom, fiber.props)
     }
 
-    initChildren(fiber)
+    const children = fiber.props.children
+
+    initChildren(fiber, children)
+}
+
+function performWorkForUnit(fiber) {
+    const isFunctionComponent = typeof fiber.type === 'function'
+    if (isFunctionComponent) {
+        updateFunctionComponent(fiber)
+    } else {
+        updateHostComponent(fiber)
+    }
+
+    
 
     if (fiber.child) {
         return fiber.child
     }
 
-    if (fiber.sibling) {
-        return fiber.sibling
+    let nextFiber = fiber
+    while(nextFiber) {
+        if (nextFiber.sibling) {
+            return nextFiber.sibling
+        } 
+        nextFiber = nextFiber.parent
     }
-
-    return fiber.parent?.sibling
 }
 
+let root = null;
 let nextWorkOfUnit = null;
 function workLoop(deadline) {
     let shouldYield = false
@@ -96,10 +119,32 @@ function workLoop(deadline) {
         nextWorkOfUnit = performWorkForUnit(nextWorkOfUnit)
 
         shouldYield = deadline.timeRemaining() < 1;
+    }
 
+    if (!nextWorkOfUnit && root) {
+        commitRoot()
     }
 
     requestIdleCallback(workLoop)
+}
+
+function commitRoot() {
+    commitWork(root.child)
+
+    root = null
+}
+
+function commitWork(fiber) {
+    if (!fiber) return
+    let fiberParent = fiber?.parent
+    while (!fiberParent.dom) {
+        fiberParent = fiberParent.parent
+    }
+    if (fiber.dom) {
+        fiberParent.dom.append(fiber.dom)
+    }
+    commitWork(fiber.child)
+    commitWork(fiber.sibling)
 }
 
 requestIdleCallback(workLoop)
