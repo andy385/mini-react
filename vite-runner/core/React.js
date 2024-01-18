@@ -24,67 +24,138 @@ function createElement(type, props, ...children) {
 }
 
 function render(el, container) {
-    nextWorkOfUnit = {
+    wipRoot = {
         dom: container,
         props: {
             children: [el]
         }
     }
 
-    root = nextWorkOfUnit;
+    nextWorkOfUnit = wipRoot;
+}
+
+function update() {
+    let currentFiber = wipFiber
+
+    return () => {
+
+        wipRoot = {
+            ...currentFiber,
+            alternate: currentFiber
+        }
+    
+        nextWorkOfUnit = wipRoot
+    }
+    
 }
 
 function createDom(type) {
     return type === 'TEXT_ELEMENT'
         ? document.createTextNode('')
         : document.createElement(type)
-
 }
 
-function updateProps(dom, props) {
-    Object.keys(props).forEach(key => {
+function updateProps(dom, nextProps, prevProps) {
+
+
+    // 删除
+    Object.keys(prevProps).forEach(key => {
         if (key !== 'children') {
-            dom[key] = props[key]
+            if (!(key in nextProps)) {
+                dom.removeAttribute(key)
+            }
+        }
+    })
+
+    // add update
+    Object.keys(nextProps).forEach(key => {
+        if (key !== 'children') {
+            if (nextProps[key] !== prevProps[key]) {
+                if (key.startsWith('on')) {
+                    const eventName = key.slice(2).toLowerCase()
+                    dom.removeEventListener(eventName, prevProps[key])
+                    dom.addEventListener(eventName, nextProps[key])
+                } else {
+                    dom[key] = nextProps[key]
+                }
+            }
         }
     })
 }
 
-function initChildren(fiber, children) {
+function reconcileChildren(fiber, children) {
     let prevChild = null;
+    let oldFiber = fiber.alternate?.child
     children.forEach((child, index) => {
-        const newFiber = {
-            type: child.type,
-            props: child.props,
-            child: null,
-            sibling: null,
-            parent: fiber,
-            dom: null
+        const isSameType = oldFiber && oldFiber.type === child.type
+        let newFiber
+        if (isSameType) {
+            newFiber = {
+                type: child.type,
+                props: child.props,
+                child: null,
+                sibling: null,
+                parent: fiber,
+                dom: oldFiber.dom,
+                alternate: oldFiber,
+                effectTag: 'update'
+            }
+        } else {
+            if (child) {
+                newFiber = {
+                    type: child.type,
+                    props: child.props,
+                    child: null,
+                    sibling: null,
+                    parent: fiber,
+                    dom: null,
+                    effectTag: 'placement'
+                }
+            }
+            
+            if (oldFiber) {
+                deletions.push(oldFiber)
+            }
         }
+
+        if (oldFiber) {
+            oldFiber = oldFiber.sibling
+        }
+
         if (index === 0) {
             fiber.child = newFiber
         } else {
             prevChild.sibling = newFiber
         }
-        prevChild = newFiber
+        if (newFiber) {
+            prevChild = newFiber
+        }
     })
+
+    while (oldFiber) {
+        deletions.push(oldFiber)
+        oldFiber = oldFiber.sibling
+    }
 
 }
 
 function updateFunctionComponent(fiber) {
+    console.log(wipFiber)
+    wipFiber = fiber
     const children = [fiber.type(fiber.props)]
-    initChildren(fiber, children)
+    reconcileChildren(fiber, children)
 }
 
 function updateHostComponent(fiber) {
     if (!fiber.dom) {
         const dom = (fiber.dom = createDom(fiber.type))
 
-        updateProps(dom, fiber.props)
+        updateProps(dom, fiber.props, {})
     }
 
     const children = fiber.props.children
 
-    initChildren(fiber, children)
+    reconcileChildren(fiber, children)
 }
 
 function performWorkForUnit(fiber) {
@@ -95,33 +166,38 @@ function performWorkForUnit(fiber) {
         updateHostComponent(fiber)
     }
 
-    
-
     if (fiber.child) {
         return fiber.child
     }
 
     let nextFiber = fiber
-    while(nextFiber) {
+    while (nextFiber) {
         if (nextFiber.sibling) {
             return nextFiber.sibling
-        } 
+        }
         nextFiber = nextFiber.parent
     }
 }
 
-let root = null;
+let wipFiber = null
+let deletions = []
+// work in progress root
+let wipRoot = null;
+let currentRoot = null;
 let nextWorkOfUnit = null;
 function workLoop(deadline) {
     let shouldYield = false
 
     while (!shouldYield && nextWorkOfUnit) {
         nextWorkOfUnit = performWorkForUnit(nextWorkOfUnit)
+        if(wipRoot?.sibling?.type === nextWorkOfUnit?.type) {
+            nextWorkOfUnit = undefined
+        }
 
         shouldYield = deadline.timeRemaining() < 1;
     }
 
-    if (!nextWorkOfUnit && root) {
+    if (!nextWorkOfUnit && wipRoot) {
         commitRoot()
     }
 
@@ -129,9 +205,35 @@ function workLoop(deadline) {
 }
 
 function commitRoot() {
-    commitWork(root.child)
+    deletions.forEach(commitDeletion)
+    commitWork(wipRoot.child)
+    currentRoot = wipRoot
+    wipRoot = null
+    deletions = []
+}
 
-    root = null
+// planA: 循环找子节点
+// function commitDeletion(fiber) {
+
+//     let childFiber = fiber
+//     while (!childFiber.dom) {
+//         childFiber = fiber.child
+//     }
+//     console.log(childFiber)
+//     fiber.parent.dom.removeChild(childFiber.dom)
+// }
+
+// planB: 
+function commitDeletion(fiber) {
+    if (fiber?.dom) {
+        let fiberParent = fiber?.parent
+        while (!fiberParent.dom) {
+            fiberParent = fiberParent.parent
+        }
+        fiberParent.dom.removeChild(fiber.dom)
+    } else {
+        commitDeletion(fiber.child)
+    }
 }
 
 function commitWork(fiber) {
@@ -140,9 +242,15 @@ function commitWork(fiber) {
     while (!fiberParent.dom) {
         fiberParent = fiberParent.parent
     }
-    if (fiber.dom) {
-        fiberParent.dom.append(fiber.dom)
+
+    if (fiber.effectTag === 'update') {
+        updateProps(fiber.dom, fiber.props, fiber.alternate?.props)
+    } else if (fiber.effectTag === 'placement') {
+        if (fiber.dom) {
+            fiberParent.dom.append(fiber.dom)
+        }
     }
+
     commitWork(fiber.child)
     commitWork(fiber.sibling)
 }
@@ -150,6 +258,7 @@ function commitWork(fiber) {
 requestIdleCallback(workLoop)
 
 const React = {
+    update,
     render,
     createElement,
 }
