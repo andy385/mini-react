@@ -43,10 +43,50 @@ function update() {
             ...currentFiber,
             alternate: currentFiber
         }
-    
+
         nextWorkOfUnit = wipRoot
     }
-    
+
+}
+
+let stateHooks = []
+let stateHookIndex
+function useState(initial) {
+    let currentFiber = wipFiber
+    const oldHook = currentFiber.alternate?.stateHooks[stateHookIndex]
+    const stateHook = {
+        state: oldHook ? oldHook.state : initial,
+        queue: oldHook ? oldHook.queue : []
+    }
+
+    stateHook.queue.forEach((action) => {
+        stateHook.state = action(stateHook.state)
+    })
+
+    stateHook.queue = []
+
+    stateHookIndex++
+    stateHooks.push(stateHook)
+    currentFiber.stateHooks = stateHooks
+
+    function setState(action) {
+        const eagerState = typeof action === 'function' ? action(stateHook.state) : action
+
+        if (eagerState === stateHook.state) {
+            return
+        }
+
+        stateHook.queue.push(typeof action === 'function' ? action : () => action)
+
+        wipRoot = {
+            ...currentFiber,
+            alternate: currentFiber
+        }
+
+        nextWorkOfUnit = wipRoot
+    }
+
+    return [stateHook.state, setState]
 }
 
 function createDom(type) {
@@ -112,7 +152,7 @@ function reconcileChildren(fiber, children) {
                     effectTag: 'placement'
                 }
             }
-            
+
             if (oldFiber) {
                 deletions.push(oldFiber)
             }
@@ -140,7 +180,8 @@ function reconcileChildren(fiber, children) {
 }
 
 function updateFunctionComponent(fiber) {
-    console.log(wipFiber)
+    stateHooks = []
+    stateHookIndex = 0
     wipFiber = fiber
     const children = [fiber.type(fiber.props)]
     reconcileChildren(fiber, children)
@@ -190,7 +231,7 @@ function workLoop(deadline) {
 
     while (!shouldYield && nextWorkOfUnit) {
         nextWorkOfUnit = performWorkForUnit(nextWorkOfUnit)
-        if(wipRoot?.sibling?.type === nextWorkOfUnit?.type) {
+        if (wipRoot?.sibling?.type === nextWorkOfUnit?.type) {
             nextWorkOfUnit = undefined
         }
 
@@ -258,7 +299,8 @@ function commitWork(fiber) {
 requestIdleCallback(workLoop)
 
 const React = {
-    update,
+    useState,
+    // update,
     render,
     createElement,
 }

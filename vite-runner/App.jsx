@@ -23,19 +23,21 @@ function Counter() {
     );
 }
 
-let countFoo = 1
 function Foo() {
+    const [count, setCount] = React.useState(10)
+    const [bar, setBar] = React.useState('bar')
+
     console.log('foo ===')
-    const update = React.update()
     function handleClick() {
-        countFoo++
-        update()
+        setCount((c) => c + 1)
+        setBar('bar')
     }
 
     return (
         <div>
             <h1>foo</h1>
-            {countFoo}
+            {count}
+            <div>{bar}</div>
             <button onClick={handleClick}>click</button>
         </div>
     )
@@ -44,16 +46,15 @@ function Foo() {
 let countBar = 1
 function Bar() {
     console.log('bar ===')
-    const update = React.update()
+    const [bar, setBar] = React.useState('')
     function handleClick() {
-        countBar++
-        update()
+        setBar((b) => b + 'bar')
     }
 
     return (
         <div>
             <h1>bar</h1>
-            {countBar}
+            {bar}
             <button onClick={handleClick}>click</button>
         </div>
     )
@@ -65,8 +66,6 @@ function App() {
             hi,mini-react
             <Foo></Foo>
             <Bar></Bar>
-            aaa
-            bbb
         </div>
     )
 }
