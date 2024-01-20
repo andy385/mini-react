@@ -49,6 +49,7 @@ function update() {
 
 }
 
+let effectHooks = []
 let stateHooks = []
 let stateHookIndex
 function useState(initial) {
@@ -87,6 +88,17 @@ function useState(initial) {
     }
 
     return [stateHook.state, setState]
+}
+
+function useEffect(callback, deps) {
+    const effectHook = {
+        callback,
+        deps,
+        cleanup: undefined
+    }
+
+    effectHooks.push(effectHook)
+    wipFiber.effectHooks = effectHooks
 }
 
 function createDom(type) {
@@ -183,6 +195,7 @@ function updateFunctionComponent(fiber) {
     stateHooks = []
     stateHookIndex = 0
     wipFiber = fiber
+    effectHooks = []
     const children = [fiber.type(fiber.props)]
     reconcileChildren(fiber, children)
 }
@@ -248,6 +261,7 @@ function workLoop(deadline) {
 function commitRoot() {
     deletions.forEach(commitDeletion)
     commitWork(wipRoot.child)
+    commitEffectHooks()
     currentRoot = wipRoot
     wipRoot = null
     deletions = []
@@ -277,6 +291,51 @@ function commitDeletion(fiber) {
     }
 }
 
+function commitEffectHooks() {
+    function run(fiber) {
+        if (!fiber) return
+        if (!fiber?.alternate) { 
+            // init
+            fiber?.effectHooks?.forEach(effectHook => {
+                effectHook.cleanup = effectHook.callback()
+            })
+        } else {
+            // update
+            fiber?.effectHooks?.forEach((newEffectHook, index) => {
+
+                if(newEffectHook.deps.length > 0) {
+                    const oldEffectHook = fiber?.alternate.effectHooks[index]
+                    const shouldUpdate = newEffectHook?.deps.some((dep, i) => {
+                        return dep !== oldEffectHook.deps[i]
+                    })
+        
+                    shouldUpdate && newEffectHook.callback()
+                }
+
+            })
+            
+        }
+
+        run(fiber.child)
+        run(fiber.sibling)
+    }
+
+    function runCleanup(fiber) {
+        if (!fiber) return
+        fiber?.alternate?.effectHooks?.forEach(effectHook => {
+            if (effectHook.deps.length > 0) {
+                effectHook.cleanup()
+            }
+        })
+
+        runCleanup(fiber.child)
+        runCleanup(fiber.sibling)
+    }
+
+    runCleanup(wipRoot)
+    run(wipRoot)
+}
+
 function commitWork(fiber) {
     if (!fiber) return
     let fiberParent = fiber?.parent
@@ -300,6 +359,7 @@ requestIdleCallback(workLoop)
 
 const React = {
     useState,
+    useEffect,
     // update,
     render,
     createElement,

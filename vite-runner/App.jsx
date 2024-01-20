@@ -27,6 +27,31 @@ function Foo() {
     const [count, setCount] = React.useState(10)
     const [bar, setBar] = React.useState('bar')
 
+
+    React.useEffect(() => {
+        console.log('init 0')
+
+        return () => {
+            console.log('cleanup 0')
+        }
+    }, [])
+
+    React.useEffect(() => {
+        console.log('init 1')
+
+        return () => {
+            console.log('cleanup 1')
+        }
+    }, [count])
+
+    React.useEffect(() => {
+        console.log('init 2')
+
+        return () => {
+            console.log('cleanup 2')
+        }
+    }, [count])
+
     console.log('foo ===')
     function handleClick() {
         setCount((c) => c + 1)
